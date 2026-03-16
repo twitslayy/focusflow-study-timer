@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { blink } from '@/lib/blink'
+import { supabase } from '@/lib/supabase'
 import type { ThemeMode, AccentColor } from '@/context/ThemeContext'
 
 export interface UserSettings {
@@ -30,46 +30,48 @@ export const DEFAULT_SETTINGS: UserSettings = {
 
 interface RawSettings {
   id: string
-  userId: string
-  focusDuration: number
-  shortBreakDuration: number
-  longBreakDuration: number
-  longBreakInterval: number
-  themeMode: string
-  accentColor: string
-  notificationSound: string | number
-  autoStartBreaks: string | number
-  autoStartFocus: string | number
-  dailyGoalSessions: number
-  createdAt: string
-  updatedAt: string
+  user_id: string
+  focus_duration: number
+  short_break_duration: number
+  long_break_duration: number
+  long_break_interval: number
+  theme_mode: string
+  accent_color: string
+  notification_sound: boolean
+  auto_start_breaks: boolean
+  auto_start_focus: boolean
+  daily_goal_sessions: number
+  created_at: string
+  updated_at: string
 }
 
 function fromRaw(raw: RawSettings): UserSettings {
   return {
-    focusDuration: raw.focusDuration,
-    shortBreakDuration: raw.shortBreakDuration,
-    longBreakDuration: raw.longBreakDuration,
-    longBreakInterval: raw.longBreakInterval,
-    themeMode: raw.themeMode as ThemeMode,
-    accentColor: raw.accentColor as AccentColor,
-    notificationSound: Number(raw.notificationSound) > 0,
-    autoStartBreaks: Number(raw.autoStartBreaks) > 0,
-    autoStartFocus: Number(raw.autoStartFocus) > 0,
-    dailyGoalSessions: raw.dailyGoalSessions,
+    focusDuration: raw.focus_duration,
+    shortBreakDuration: raw.short_break_duration,
+    longBreakDuration: raw.long_break_duration,
+    longBreakInterval: raw.long_break_interval,
+    themeMode: raw.theme_mode as ThemeMode,
+    accentColor: raw.accent_color as AccentColor,
+    notificationSound: !!raw.notification_sound,
+    autoStartBreaks: !!raw.auto_start_breaks,
+    autoStartFocus: !!raw.auto_start_focus,
+    dailyGoalSessions: raw.daily_goal_sessions,
   }
 }
 
 export function useSettings() {
   const loadSettings = useCallback(async (userId: string): Promise<UserSettings> => {
     try {
-      const rows = await blink.db.userSettings.list({
-        where: { userId },
-        limit: 1,
-      }) as RawSettings[]
+      const { data } = await supabase
+        .from('user_settings')
+        .select('*')
+        .eq('user_id', userId)
+        .limit(1)
+        .single()
 
-      if (rows.length > 0) {
-        return fromRaw(rows[0])
+      if (data) {
+        return fromRaw(data as RawSettings)
       }
       return { ...DEFAULT_SETTINGS }
     } catch (_) {
@@ -79,34 +81,40 @@ export function useSettings() {
 
   const saveSettings = useCallback(async (userId: string, settings: Partial<UserSettings>) => {
     try {
-      const existing = await blink.db.userSettings.list({
-        where: { userId },
-        limit: 1,
-      }) as RawSettings[]
+      const { data: existing } = await supabase
+        .from('user_settings')
+        .select('*')
+        .eq('user_id', userId)
+        .limit(1)
+        .single()
 
       const merged: UserSettings = {
         ...DEFAULT_SETTINGS,
-        ...(existing.length > 0 ? fromRaw(existing[0]) : {}),
+        ...(existing ? fromRaw(existing as RawSettings) : {}),
         ...settings,
       }
 
       const payload = {
-        id: existing.length > 0 ? existing[0].id : `settings_${userId}`,
-        userId,
-        focusDuration: merged.focusDuration,
-        shortBreakDuration: merged.shortBreakDuration,
-        longBreakDuration: merged.longBreakDuration,
-        longBreakInterval: merged.longBreakInterval,
-        themeMode: merged.themeMode,
-        accentColor: merged.accentColor,
-        notificationSound: merged.notificationSound ? 1 : 0,
-        autoStartBreaks: merged.autoStartBreaks ? 1 : 0,
-        autoStartFocus: merged.autoStartFocus ? 1 : 0,
-        dailyGoalSessions: merged.dailyGoalSessions,
-        updatedAt: new Date().toISOString(),
+        id: existing ? (existing as RawSettings).id : `settings_${userId}`,
+        user_id: userId,
+        focus_duration: merged.focusDuration,
+        short_break_duration: merged.shortBreakDuration,
+        long_break_duration: merged.longBreakDuration,
+        long_break_interval: merged.longBreakInterval,
+        theme_mode: merged.themeMode,
+        accent_color: merged.accentColor,
+        notification_sound: merged.notificationSound,
+        auto_start_breaks: merged.autoStartBreaks,
+        auto_start_focus: merged.autoStartFocus,
+        daily_goal_sessions: merged.dailyGoalSessions,
+        updated_at: new Date().toISOString(),
       }
 
-      await blink.db.userSettings.upsert(payload)
+      const { error } = await supabase
+        .from('user_settings')
+        .upsert(payload, { onConflict: 'user_id' })
+
+      if (error) return { success: false, error: error.message }
       return { success: true }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save settings'

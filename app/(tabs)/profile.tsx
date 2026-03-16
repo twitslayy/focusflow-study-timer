@@ -21,19 +21,19 @@ import * as Haptics from 'expo-haptics'
 
 import { useTheme } from '@/context/ThemeContext'
 import { useAuth } from '@/context/AuthContext'
-import { blink } from '@/lib/blink'
+import { supabase } from '@/lib/supabase'
 import { spacing, typography, borderRadius, shadows, withOpacity } from '@/constants/design'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface StudyStreak {
   id: string
-  userId: string
-  currentStreak: number
-  longestStreak: number
-  lastStudyDate: string | null
-  totalSessions: number
-  totalFocusMinutes: number
+  user_id: string
+  current_streak: number
+  longest_streak: number
+  last_study_date: string | null
+  total_sessions: number
+  total_focus_minutes: number
 }
 
 interface Achievement {
@@ -148,20 +148,22 @@ export default function ProfileScreen() {
     queryKey: ['study-streak', user?.id],
     queryFn: async () => {
       if (!user?.id) return null
-      const rows = await (blink.db as any).studyStreaks.list({
-        where: { userId: user.id },
-        limit: 1,
-      })
-      return (rows[0] as StudyStreak) ?? null
+      const { data } = await supabase
+        .from('study_streaks')
+        .select('*')
+        .eq('user_id', user.id)
+        .limit(1)
+        .single()
+      return (data as StudyStreak) ?? null
     },
     enabled: !!user?.id,
   })
 
   const achievements = useMemo<Achievement[]>(() => {
-    const total = streak?.totalSessions ?? 0
-    const currentStreak = streak?.currentStreak ?? 0
-    const longestStreak = streak?.longestStreak ?? 0
-    const totalMinutes = streak?.totalFocusMinutes ?? 0
+    const total = streak?.total_sessions ?? 0
+    const currentStreak = streak?.current_streak ?? 0
+    const longestStreak = streak?.longest_streak ?? 0
+    const totalMinutes = streak?.total_focus_minutes ?? 0
 
     return [
       {
@@ -207,10 +209,10 @@ export default function ProfileScreen() {
     router.replace('/auth/splash')
   }
 
-  const displayName = (user as any)?.displayName ?? (user as any)?.email?.split('@')[0] ?? 'User'
-  const email = (user as any)?.email ?? ''
-  const initials = getInitials((user as any)?.displayName, email)
-  const memberSince = getMemberSince((user as any)?.createdAt)
+  const displayName = user?.user_metadata?.display_name ?? user?.email?.split('@')[0] ?? 'User'
+  const email = user?.email ?? ''
+  const initials = getInitials(user?.user_metadata?.display_name, email)
+  const memberSince = getMemberSince(user?.created_at)
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top']}>
@@ -259,24 +261,24 @@ export default function ProfileScreen() {
               <StatCell
                 emoji="🔥"
                 label="Current Streak"
-                value={`${streak?.currentStreak ?? 0} days`}
+                value={`${streak?.current_streak ?? 0} days`}
               />
               <StatCell
                 emoji="⏱️"
                 label="Total Focus"
-                value={formatTotalTime(streak?.totalFocusMinutes ?? 0)}
+                value={formatTotalTime(streak?.total_focus_minutes ?? 0)}
               />
             </View>
             <View style={styles.statsRow}>
               <StatCell
                 emoji="📚"
                 label="Total Sessions"
-                value={`${streak?.totalSessions ?? 0}`}
+                value={`${streak?.total_sessions ?? 0}`}
               />
               <StatCell
                 emoji="🏆"
                 label="Longest Streak"
-                value={`${streak?.longestStreak ?? 0} days`}
+                value={`${streak?.longest_streak ?? 0} days`}
               />
             </View>
           </View>

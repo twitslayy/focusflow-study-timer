@@ -1,30 +1,30 @@
 import { useCallback } from 'react'
-import { blink } from '@/lib/blink'
+import { supabase } from '@/lib/supabase'
 
 export type SessionType = 'focus' | 'shortBreak' | 'longBreak'
 
 interface StudySession {
   id: string
-  userId: string
-  sessionType: SessionType
-  durationMinutes: number
-  completed: string | number
-  startedAt: string
-  completedAt: string | null
+  user_id: string
+  session_type: string
+  duration_minutes: number
+  completed: boolean
+  started_at: string
+  completed_at: string | null
   notes: string | null
-  createdAt: string
+  created_at: string
 }
 
 interface StudyStreak {
   id: string
-  userId: string
-  currentStreak: number
-  longestStreak: number
-  lastStudyDate: string | null
-  totalSessions: number
-  totalFocusMinutes: number
-  createdAt: string
-  updatedAt: string
+  user_id: string
+  current_streak: number
+  longest_streak: number
+  last_study_date: string | null
+  total_sessions: number
+  total_focus_minutes: number
+  created_at: string
+  updated_at: string
 }
 
 interface DayStats {
@@ -56,16 +56,17 @@ export function useStudySession() {
       startedAt?: string,
     ) => {
       const started = startedAt ?? new Date(Date.now() - durationMinutes * 60 * 1000).toISOString()
-      await blink.db.studySessions.create({
+      const { error } = await supabase.from('study_sessions').insert({
         id: `session_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        userId,
-        sessionType: type,
-        durationMinutes,
-        completed: 1,
-        startedAt: started,
-        completedAt,
+        user_id: userId,
+        session_type: type,
+        duration_minutes: durationMinutes,
+        completed: true,
+        started_at: started,
+        completed_at: completedAt,
         notes: null,
       })
+      if (error) throw error
     },
     [],
   )
@@ -74,29 +75,31 @@ export function useStudySession() {
     const today = new Date()
     const todayStr = today.toISOString().split('T')[0]
 
-    const existing = await blink.db.studyStreaks.list({
-      where: { userId },
-      limit: 1,
-    }) as StudyStreak[]
+    const { data: existing } = await supabase
+      .from('study_streaks')
+      .select('*')
+      .eq('user_id', userId)
+      .limit(1)
+      .single()
 
-    if (existing.length === 0) {
-      await blink.db.studyStreaks.create({
+    if (!existing) {
+      await supabase.from('study_streaks').insert({
         id: `streak_${userId}`,
-        userId,
-        currentStreak: 1,
-        longestStreak: 1,
-        lastStudyDate: todayStr,
-        totalSessions: 1,
-        totalFocusMinutes: addMinutes,
-        updatedAt: new Date().toISOString(),
+        user_id: userId,
+        current_streak: 1,
+        longest_streak: 1,
+        last_study_date: todayStr,
+        total_sessions: 1,
+        total_focus_minutes: addMinutes,
+        updated_at: new Date().toISOString(),
       })
       return
     }
 
-    const record = existing[0]
-    const lastDate = record.lastStudyDate ? new Date(record.lastStudyDate) : null
+    const record = existing as StudyStreak
+    const lastDate = record.last_study_date ? new Date(record.last_study_date) : null
 
-    let newStreak = record.currentStreak
+    let newStreak = record.current_streak
     if (!lastDate) {
       newStreak = 1
     } else if (isSameDay(lastDate, today)) {
@@ -107,18 +110,21 @@ export function useStudySession() {
       newStreak = 1
     }
 
-    const longestStreak = Math.max(newStreak, record.longestStreak)
-    const totalSessions = record.totalSessions + 1
-    const totalFocusMinutes = record.totalFocusMinutes + addMinutes
+    const longestStreak = Math.max(newStreak, record.longest_streak)
+    const totalSessions = record.total_sessions + 1
+    const totalFocusMinutes = record.total_focus_minutes + addMinutes
 
-    await blink.db.studyStreaks.update(record.id, {
-      currentStreak: newStreak,
-      longestStreak,
-      lastStudyDate: todayStr,
-      totalSessions,
-      totalFocusMinutes,
-      updatedAt: new Date().toISOString(),
-    })
+    await supabase
+      .from('study_streaks')
+      .update({
+        current_streak: newStreak,
+        longest_streak: longestStreak,
+        last_study_date: todayStr,
+        total_sessions: totalSessions,
+        total_focus_minutes: totalFocusMinutes,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', record.id)
   }, [])
 
   const getUserStats = useCallback(
@@ -127,32 +133,40 @@ export function useStudySession() {
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
       const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString()
 
-      const [allSessions, streakRows] = await Promise.all([
-        blink.db.studySessions.list({ where: { userId } }) as Promise<StudySession[]>,
-        blink.db.studyStreaks.list({ where: { userId }, limit: 1 }) as Promise<StudyStreak[]>,
+      const [sessionsResult, streakResult] = await Promise.all([
+        supabase
+          .from('study_sessions')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('completed', true)
+          .eq('session_type', 'focus'),
+        supabase
+          .from('study_streaks')
+          .select('*')
+          .eq('user_id', userId)
+          .limit(1)
+          .single(),
       ])
 
-      const focusSessions = allSessions.filter(
-        (s) => s.sessionType === 'focus' && Number(s.completed) > 0,
-      )
+      const allSessions = (sessionsResult.data ?? []) as StudySession[]
 
-      const todaySessions = focusSessions.filter(
-        (s) => s.completedAt && s.completedAt >= startOfToday,
+      const todaySessions = allSessions.filter(
+        (s) => s.completed_at && s.completed_at >= startOfToday,
       )
-      const weekSessions = focusSessions.filter(
-        (s) => s.completedAt && s.completedAt >= startOfWeek,
+      const weekSessions = allSessions.filter(
+        (s) => s.completed_at && s.completed_at >= startOfWeek,
       )
 
       return {
         today: {
           totalSessions: todaySessions.length,
-          focusMinutes: todaySessions.reduce((acc, s) => acc + s.durationMinutes, 0),
+          focusMinutes: todaySessions.reduce((acc, s) => acc + s.duration_minutes, 0),
         },
         week: {
           totalSessions: weekSessions.length,
-          focusMinutes: weekSessions.reduce((acc, s) => acc + s.durationMinutes, 0),
+          focusMinutes: weekSessions.reduce((acc, s) => acc + s.duration_minutes, 0),
         },
-        streak: streakRows[0] ?? null,
+        streak: (streakResult.data as StudyStreak) ?? null,
       }
     },
     [],

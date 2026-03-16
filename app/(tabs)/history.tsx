@@ -19,7 +19,7 @@ import { useQuery } from '@tanstack/react-query'
 
 import { useTheme } from '@/context/ThemeContext'
 import { useAuth } from '@/context/AuthContext'
-import { blink } from '@/lib/blink'
+import { supabase } from '@/lib/supabase'
 import { spacing, typography, borderRadius, shadows, withOpacity } from '@/constants/design'
 import StatsCard from '@/components/StatsCard'
 import WeeklyChart, { type ChartDay } from '@/components/WeeklyChart'
@@ -28,22 +28,22 @@ import WeeklyChart, { type ChartDay } from '@/components/WeeklyChart'
 
 interface StudySession {
   id: string
-  userId: string
-  sessionType: string
-  durationMinutes: number
-  completed: string | number
-  startedAt: string
-  completedAt: string | null
+  user_id: string
+  session_type: string
+  duration_minutes: number
+  completed: boolean
+  started_at: string
+  completed_at: string | null
 }
 
 interface StudyStreak {
   id: string
-  userId: string
-  currentStreak: number
-  longestStreak: number
-  lastStudyDate: string | null
-  totalSessions: number
-  totalFocusMinutes: number
+  user_id: string
+  current_streak: number
+  longest_streak: number
+  last_study_date: string | null
+  total_sessions: number
+  total_focus_minutes: number
 }
 
 type FilterTab = 'today' | 'week' | 'month'
@@ -93,7 +93,7 @@ function formatTime(iso: string | null): string {
 function groupByDate(sessions: StudySession[]): { title: string; data: StudySession[] }[] {
   const map = new Map<string, StudySession[]>()
   sessions.forEach((s) => {
-    const key = s.completedAt ? formatDate(s.completedAt) : 'In Progress'
+    const key = s.completed_at ? formatDate(s.completed_at) : 'In Progress'
     if (!map.has(key)) map.set(key, [])
     map.get(key)!.push(s)
   })
@@ -115,11 +115,11 @@ function getWeekChartData(sessions: StudySession[]): ChartDay[] {
 
     const mins = sessions
       .filter((s) => {
-        if (!s.completedAt || s.sessionType !== 'focus' || Number(s.completed) === 0) return false
-        const d = new Date(s.completedAt)
+        if (!s.completed_at || s.session_type !== 'focus' || !s.completed) return false
+        const d = new Date(s.completed_at)
         return d >= dayStart && d < dayEnd
       })
-      .reduce((acc, s) => acc + s.durationMinutes, 0)
+      .reduce((acc, s) => acc + s.duration_minutes, 0)
 
     return { day, minutes: mins }
   })
@@ -135,8 +135,8 @@ interface SessionItemProps {
 function SessionItem({ session }: SessionItemProps) {
   const { colors } = useTheme()
 
-  const isFocus = session.sessionType === 'focus'
-  const isShortBreak = session.sessionType === 'shortBreak'
+  const isFocus = session.session_type === 'focus'
+  const isShortBreak = session.session_type === 'shortBreak'
   const iconName = isFocus ? 'timer-outline' : isShortBreak ? 'cafe-outline' : 'leaf-outline'
   const iconColor = isFocus ? colors.primary : colors.textSecondary
   const typeLabel = isFocus ? 'Focus' : isShortBreak ? 'Short Break' : 'Long Break'
@@ -149,11 +149,11 @@ function SessionItem({ session }: SessionItemProps) {
       <View style={styles.sessionInfo}>
         <Text style={[styles.sessionType, { color: colors.text }]}>{typeLabel}</Text>
         <Text style={[styles.sessionTime, { color: colors.textTertiary }]}>
-          {formatTime(session.completedAt)}
+          {formatTime(session.completed_at)}
         </Text>
       </View>
       <Text style={[styles.sessionDuration, { color: colors.textSecondary }]}>
-        {formatDuration(session.durationMinutes)}
+        {formatDuration(session.duration_minutes)}
       </Text>
     </View>
   )
@@ -176,11 +176,12 @@ export default function HistoryScreen() {
     queryKey: ['study-sessions', user?.id],
     queryFn: async () => {
       if (!user?.id) return []
-      const rows = await (blink.db as any).studySessions.list({
-        where: { userId: user.id },
-        orderBy: { completedAt: 'desc' },
-      })
-      return rows as StudySession[]
+      const { data } = await supabase
+        .from('study_sessions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('completed_at', { ascending: false })
+      return (data ?? []) as StudySession[]
     },
     enabled: !!user?.id,
   })
@@ -190,11 +191,13 @@ export default function HistoryScreen() {
     queryKey: ['study-streak', user?.id],
     queryFn: async () => {
       if (!user?.id) return null
-      const rows = await (blink.db as any).studyStreaks.list({
-        where: { userId: user.id },
-        limit: 1,
-      })
-      return (rows[0] as StudyStreak) ?? null
+      const { data } = await supabase
+        .from('study_streaks')
+        .select('*')
+        .eq('user_id', user.id)
+        .limit(1)
+        .single()
+      return (data as StudyStreak) ?? null
     },
     enabled: !!user?.id,
   })
@@ -203,18 +206,18 @@ export default function HistoryScreen() {
   const filteredSessions = useMemo(() => {
     const cutoff = startOf(activeFilter)
     return allSessions.filter((s) => {
-      if (!s.completedAt) return false
-      return new Date(s.completedAt) >= cutoff
+      if (!s.completed_at) return false
+      return new Date(s.completed_at) >= cutoff
     })
   }, [allSessions, activeFilter])
 
   const focusSessions = useMemo(
-    () => filteredSessions.filter((s) => s.sessionType === 'focus' && Number(s.completed) > 0),
+    () => filteredSessions.filter((s) => s.session_type === 'focus' && s.completed),
     [filteredSessions],
   )
 
   const totalFocusMinutes = useMemo(
-    () => focusSessions.reduce((acc, s) => acc + s.durationMinutes, 0),
+    () => focusSessions.reduce((acc, s) => acc + s.duration_minutes, 0),
     [focusSessions],
   )
 
@@ -240,7 +243,7 @@ export default function HistoryScreen() {
   const todaySessions = useMemo(() => {
     const cutoff = startOf('today')
     return allSessions.filter(
-      (s) => s.sessionType === 'focus' && s.completedAt && new Date(s.completedAt) >= cutoff,
+      (s) => s.session_type === 'focus' && s.completed_at && new Date(s.completed_at) >= cutoff,
     ).length
   }, [allSessions])
 
@@ -290,7 +293,7 @@ export default function HistoryScreen() {
           <StatsCard
             icon="flame-outline"
             label="Current Streak"
-            value={streak ? `${streak.currentStreak}d 🔥` : '0d'}
+            value={streak ? `${streak.current_streak}d 🔥` : '0d'}
             color="#EA580C"
           />
           <StatsCard
