@@ -2,8 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -11,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node
@@ -22,20 +21,21 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Install Expo & EAS
+      - name: Install Expo + EAS
         run: npm install -g expo-cli eas-cli
 
-      - name: Login to Expo
-        run: npx expo login -u ${{ secrets.EXPO_USERNAME }} -p ${{ secrets.EXPO_PASSWORD }}
+      - name: Login to Expo (FIXED)
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.EXPO_TOKEN }}" > ~/.npmrc
 
-      - name: Fix EAS fingerprint issue
-        run: echo "EAS_SKIP_AUTO_FINGERPRINT=1" >> $GITHUB_ENV
-
-      - name: Initialize EAS (if needed)
+      - name: Configure EAS
         run: |
           if [ ! -f eas.json ]; then
             eas build:configure --platform android
           fi
+
+      - name: Skip fingerprint
+        run: echo "EAS_SKIP_AUTO_FINGERPRINT=1" >> $GITHUB_ENV
 
       - name: Build APK
         run: eas build -p android --profile preview --non-interactive
