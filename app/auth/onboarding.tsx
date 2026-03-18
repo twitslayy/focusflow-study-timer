@@ -141,7 +141,8 @@ export default function OnboardingScreen() {
   const flatListRef = useRef<FlatList>(null)
   const isLast = activeIndex === SLIDES.length - 1
 
-  const handleScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+  // Only update activeIndex from scroll when user manually drags
+  const handleMomentumScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const index = Math.round(e.nativeEvent.contentOffset.x / width)
     setActiveIndex(index)
   }
@@ -150,7 +151,11 @@ export default function OnboardingScreen() {
     if (isLast) {
       completeOnboarding()
     } else {
-      flatListRef.current?.scrollToIndex({ index: activeIndex + 1, animated: true })
+      const nextIndex = activeIndex + 1
+      // Update state IMMEDIATELY so button label/behavior updates
+      setActiveIndex(nextIndex)
+      // Then scroll the list to match
+      flatListRef.current?.scrollToIndex({ index: nextIndex, animated: true })
     }
   }
 
@@ -175,9 +180,17 @@ export default function OnboardingScreen() {
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
-          onMomentumScrollEnd={handleScroll}
+          onMomentumScrollEnd={handleMomentumScrollEnd}
           scrollEventThrottle={16}
           style={styles.list}
+          // Prevent user scroll from conflicting with programmatic scroll state
+          scrollEnabled
+          bounces={false}
+          getItemLayout={(_, index) => ({
+            length: width,
+            offset: width * index,
+            index,
+          })}
         />
 
         <View style={styles.footer}>

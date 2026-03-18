@@ -26,7 +26,8 @@
         "backgroundColor": "#0F172A"
       },
       "package": "com.focusflow.studytimer",
-      "versionCode": 1
+      "versionCode": 1,
+      "permissions": []
     },
     "web": {
       "bundler": "metro",
@@ -46,7 +47,7 @@
         "origin": false
       },
       "eas": {
-        "projectId": "your-project-id-here"
+        "projectId": "focusflow-study-app-9oprsb05"
       }
     }
   }
